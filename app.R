@@ -6,6 +6,8 @@
 #  -summ function doesn't work (can't use pval=T)
 #  -conditional panel for mouse boxplot breaks app on server 
 
+# options(shiny.error = browser)
+
 
 # TO DO: 
 #  -colorblind friendly palette for plots
@@ -17,11 +19,14 @@ library(lme4)
 library(dplyr)
 library(tidyr) #gather
 library(ggplot2)
+library(plotly)
+library(gridExtra)
 library(huxtable)
 library(broom.mixed)
 library(jtools) #export_summs
 library(table1)
 library(pbkrtest)
+library(kableExtra)
 
 # Define UI ----
 ui <- fluidPage(
@@ -73,23 +78,47 @@ ui <- fluidPage(
         
         mainPanel(
             tabsetPanel(
+                
                 tabPanel(title="Welcome", includeHTML("Welcome.html")),
+                
                 tabPanel(title="Data Summary",
                          uiOutput("summaries"), 
                          includeCSS("table1_defaults.css")),
+                
                 tabPanel(title="Exploratory Plots",
-                         plotOutput("scatterplot", height = 400, width = 600),
-                         plotOutput("avg_trend", height = 400, width = 600)),
-                tabPanel(title="Model Results",
-                         uiOutput("results_table"),
+                         plotlyOutput("scatterplot"), h3(""),
+                         h5(strong("Figure 1. Scatterplot of the response variable vs time."),
+                            "This plot can be used to verify the linearity assumption between the response 
+                            variable and time before proceeding with a linear mixed effects model."),
+                         plotlyOutput("avg_trend"), h3(""),
+                         h5(strong("Figure 2. Average trendlines for the clustered random effect variable."),
+                            "This plot can help determine if a random slope and/or random intercept would be appropriate 
+                            for the clustered random effect variable. Missing data can also be identified by gaps in
+                            the lines or truncated lines."), h3(""),
+                         plotlyOutput("facet_plots", height="600px"),
+                         conditionalPanel(condition="input.nestedRE",
+                                          h5(strong("Figure 3. Trendlines faceted by the clustered random effect variable.")))),
+                
+                tabPanel(title="Model Results", h4("Model Comparison Table"),
+                         htmlOutput("results_table"),
                          uiOutput("selectModel"),
                          conditionalPanel(
                              condition="input.model != ''",
                              verbatimTextOutput("model_summary"))),
+                
+                tabPanel(title="Diagnostic Plots",
+                         plotlyOutput("resid_plot", height="800px"), h3(""),
+                         h5(strong("Figure 4. Residual profile plots in increasing order of model complexity."),
+                            "These plots are useful to visually compare the different model fits. Models with a 
+                            large, nonconstant range in residuals over time indicate a worse model fit, whereas 
+                            models with a small, constant range in residuals over time indicate a better model fit.")),
+                
                 tabPanel(title="Fitted Lines",
                          uiOutput("selectModel2"),
-                         plotOutput("trendlines", height = 500, width = 800),
-                         plotOutput("trendlines2", height = 500, width = 800)))
+                         plotlyOutput("trendlines"), h3(""),
+                         h5(strong("Figure 5. Fitted lines.")),
+                         plotlyOutput("trendlines2"), h3(""),
+                         h5(strong("Figure 6. Fitted lines."))))
         )
     )
 )
@@ -225,12 +254,27 @@ server <- function(input, output) {
         data[[input$groupVar]] = as.factor(data[[input$groupVar]])
         
         if (input$nestedRE==TRUE){
-            data[[input$mouse]] = as.factor(data[[input$mouse]])
-            data[[input$donor]] = as.factor(data[[input$donor]])
+            
+            # relevel donor variable by decreasing response variable
+            max_donors = data %>% group_by(!!input$donor) %>% summarize(max=max(!!input$response, na.rm=T)) %>% arrange(desc(max))
+            data[[input$donor]] = factor(data[[input$donor]], levels=max_donors[[input$donor]])
+            
+            # remove response na values & arrange by donor variable
+            data2 = data %>% drop_na(!!input$response) %>% arrange(!!input$donor)
+            
+            # relevel mouse variable based on donor variable
+            data2[[input$mouse]] = factor(data2[[input$mouse]], levels=unique(data2[[input$mouse]]))
+            
         } else {
-            data[[input$re]] = as.factor(data[[input$re]])
+            
+            # relevel random effect variable by decreasing response variable
+            max_re = data %>% group_by(!!input$re) %>% summarize(max=max(!!input$response, na.rm=T)) %>% arrange(desc(max))
+            data[[input$re]] = factor(data[[input$re]], levels=max_re[[input$re]])
+            
+            # remove response na values & arrange by donor variable
+            data2 = data %>% drop_na(!!input$response) %>% arrange(!!input$re)
         }
-        data
+        data2
     })
     
     # TABS
@@ -262,7 +306,7 @@ server <- function(input, output) {
     # Exploratory Plots
     
     # scatterplot of overall data trends
-    output$scatterplot <- renderPlot({
+    output$scatterplot <- renderPlotly({
         req(dataProcessed(), input$timeVar, input$response)
         data = dataProcessed()
         
@@ -274,13 +318,35 @@ server <- function(input, output) {
             color = input$re
         }
         
-        ggplot(data) + 
-            geom_point(aes(x=!!input$timeVar, y=!!input$response, color=!!color), size=2.1) + 
-            theme_bw(base_size=17) + labs(title="Overall Trends") + guides(size="none")
+        plot1 = ggplot(data) + 
+            geom_point(aes(x=!!input$timeVar, y=!!input$response, color=!!color)) + 
+            theme_bw(base_size=12) + theme(legend.title=element_blank()) + guides(size="none")
+        
+        ggplotly(plot1) %>%
+            add_annotations(text=paste(color), xref="paper", yref="paper",
+                             x=1.02, xanchor="left", y=0.8, yanchor="bottom", 
+                             legendtitle=TRUE, showarrow=FALSE) %>%
+            layout(legend=list(y=0.8, yanchor="top"))
+    })
+    
+    # mouse trendlines faceted by donor 
+    output$facet_plots <- renderPlotly({
+        req(dataProcessed(), input$timeVar, input$response, input$nestedRE) #requires nested data
+        data = dataProcessed()
+        
+        plot2 = ggplot(data, aes(x=!!input$timeVar, y=!!input$response, color=!!input$groupVar)) + 
+            geom_line(aes(group=!!input$mouse)) + facet_wrap(vars(!!input$donor)) +
+            theme_bw(base_size=12) + theme(legend.title=element_blank()) + guides(size="none")
+        
+        ggplotly(plot2) %>%
+            add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
+                            x=1.02, xanchor="left", y=0.8, yanchor="bottom", 
+                            legendtitle=TRUE, showarrow=FALSE) %>%
+            layout(legend=list(y=0.8, yanchor="top"))
     })
     
     # trendlines per donor
-    output$avg_trend <- renderPlot({
+    output$avg_trend <- renderPlotly({
         req(dataProcessed())
         data = dataProcessed()
         
@@ -307,9 +373,7 @@ server <- function(input, output) {
             }
         }
         
-        avg_donors2 = gather(avg_donors, donor, !!input$response, -Time)
-        colnames(avg_donors2)[2] = "Donor"
-        avg_donors2 = avg_donors2 %>% arrange(desc(Donor))
+        avg_donors2 = gather(avg_donors, Donor, !!input$response, -Time)
         
         group = data %>% dplyr::select(!!donor, !!input$groupVar) %>% distinct(!!donor, .keep_all = T)
         group[[donor]] = as.character(group[[donor]])
@@ -317,18 +381,22 @@ server <- function(input, output) {
         
         times = length(unique(data[[input$timeVar]]))
         
-        group2 = as.data.frame(cbind(rep(group[[donor]], each=times), rep(group[[input$groupVar]], each=times)))
-        colnames(group2) = c("Donor", "Group")
-        group2 = group2 %>% arrange(desc(Donor))
+        group2 = data.frame(Donor=rep(group[[donor]], each=times), Group=rep(group[[input$groupVar]], each=times))
         
-        avg_donor_data = avg_donors2 %>% mutate(group2$Group)
-        colnames(avg_donor_data)[4] = "Group"
+        avg_donor_data = avg_donors2 %>% mutate(Group=group2$Group)
+        avg_donor_data$Donor = factor(avg_donor_data$Donor, levels=donors)
         
         title = paste(donor, "Trendlines", sep=" ")
         
-        ggplot() +
-            geom_line(avg_donor_data, mapping=aes(x=Time, y=!!input$response, color=Donor, linetype=Group), lwd=1) +
-            theme_bw(base_size=17) + labs(title=title)
+        plot3 = ggplot() +
+            geom_line(avg_donor_data, mapping=aes(x=Time, y=!!input$response, color=Donor, linetype=Group), lwd=0.75) +
+            theme_bw(base_size=12) + theme(legend.title=element_blank())
+        
+        ggplotly(plot3) %>%
+            add_annotations(text=paste(donor), xref="paper", yref="paper",
+                            x=1.02, xanchor="left", y=0.8, yanchor="bottom", 
+                            legendtitle=TRUE, showarrow=FALSE) %>%
+            layout(legend=list(y=0.8, yanchor="top"))
     })
     
     # Model Results
@@ -363,6 +431,8 @@ server <- function(input, output) {
     })
     
     Names <- reactive({
+        req(slopes(), mouse_slope(), mouse_(), mouse_int(), noRE())
+        
         if (input$nestedRE==TRUE){
             model.names = c(slopes()[[1]], mouse_slope()[[1]], mouse_()[[1]],
                             mouse_int()[[1]], noRE()[[1]])
@@ -372,8 +442,20 @@ server <- function(input, output) {
         model.names
     })
     
+    Models <- reactive({
+        req(slopes(), mouse_slope(), mouse_(), mouse_int(), noRE())
+        
+        if (input$nestedRE==TRUE){
+            models = list(slopes()[[2]], mouse_slope()[[2]], mouse_()[[2]],
+                            mouse_int()[[2]], noRE()[[2]])
+        } else {
+            models = list(mouse_()[[2]], mouse_int()[[2]], noRE()[[2]])
+        }
+        models
+    })
+    
     # create model results table
-    output$results_table <- renderUI({
+    output$results_table <- renderText({
         
         predictors = names(coef(noRE()[[2]]))
         
@@ -384,56 +466,48 @@ server <- function(input, output) {
             lrt3v4 = anova(mouse_()[[2]], mouse_int()[[2]])[2,8]
             lrt4v5 = anova(mouse_int()[[2]], noRE()[[2]])[2,8]
             
-            pvalues = huxtable(Pvalue = c(lrt1v2, lrt2v3, lrt3v4, lrt4v5, ""))
-            number_format(pvalues) = list(function(x) prettyNum(x, digits=3, scientific = T))
+            pvalues = as.numeric(c(lrt1v2, lrt2v3, lrt3v4, lrt4v5, ""))
+            pvalues = formatC(pvalues, format="e", digits=2)
+            pvalues[length(pvalues)] = ""
             
-            results = export_summs(slopes()[[2]], mouse_slope()[[2]], mouse_()[[2]],
-                                   mouse_int()[[2]], noRE()[[2]], statistics = c("logLik"),
-                                   error_pos = 'same', align = "center", bold_signif = 0.05, 
-                                   stars = NULL, number_format = "%.2f", model.names = Names(),
-                                   coefs = c("Group*" = predictors[2], "Time*" = predictors[3], 
-                                             "Interaction*" = predictors[4]))
+            results = results_table(Models(), pvalues, Names())
             
         } else {
             
             lrt3v4 = anova(mouse_()[[2]], mouse_int()[[2]])[2,8]
             lrt4v5 = anova(mouse_int()[[2]], noRE()[[2]])[2,8]
             
-            pvalues = huxtable(Pvalue = c(lrt3v4, lrt4v5, ""))
-            number_format(pvalues) = list(function(x) prettyNum(x, digits=3, scientific = T))
+            pvalues = as.numeric(c(lrt3v4, lrt4v5, ""))
+            pvalues = formatC(pvalues, format="e", digits=2)
+            pvalues[length(pvalues)] = ""
             
-            results = export_summs(mouse_()[[2]], mouse_int()[[2]], noRE()[[2]],
-                                   statistics = c("logLik"), error_pos = 'same', 
-                                   align = "center", bold_signif = 0.05, stars=NULL,
-                                   number_format = "%.2f", model.names = Names(),
-                                   coefs = c("Group*" = predictors[2], "Time*" = predictors[3], 
-                                             "Interaction*" = predictors[4]))
+            results = results_table(Models(), pvalues, Names())
+            
         }
-        all.results = t(results) %>% add_columns(pvalues, after=5) %>% theme_plain() %>%
-            set_right_border(everywhere, 1, 0.4) %>% set_left_border(everywhere, 5, 0.4) %>%
-            set_bottom_border(1, everywhere, 0.4) %>% set_bold(1, everywhere) %>%
-            set_caption("Model Comparison Table") %>% set_caption_pos("topleft") %>%
-            set_position("left") 
-        
-        all.results[1,5] = "Likelihood**"
-        all.results[1,6] = "P-values***"
-        align(all.results) = "center"
-        
-        all.results = all.results %>% 
-            add_footnote("*Coefficient estimates with standard errors in parantheses (bolded entries are significant at a 0.05 level)") %>%
-            add_footnote("**Log likelihoods (a larger likelihood indicates a better model fit)", border=0) %>%
-            add_footnote("***P-values from the likelihood ratio test of the model with the nested model below it", border=0)
-        
-        n_row = nrow(all.results)
+        #all.results = t(results) %>% add_columns(pvalues, after=5) %>% theme_plain() %>%
+            #set_right_border(everywhere, 1, 0.4) %>% set_left_border(everywhere, 5, 0.4) %>%
+            #set_bottom_border(1, everywhere, 0.4) %>% set_bold(1, everywhere) %>%
+            #set_caption("Model Comparison Table") %>% set_caption_pos("topleft") %>%
+            #set_position("left") 
             
-        all.results = all.results %>%  
-            set_left_padding(everywhere, 1, 3) %>% set_right_padding(everywhere, 1, 3) %>%
-            set_top_padding(everywhere, everywhere, 3) %>% set_bottom_padding(everywhere, everywhere, 3) %>%
-            set_top_padding((n_row-1):n_row, everywhere, 0) %>% set_bottom_padding((n_row-2):n_row, everywhere, 0) %>%
-            set_number_format(everywhere, 5, list(function(x) prettyNum(x, big.mark=","))) 
+        #all.results = all.results %>%  
+            #set_left_padding(everywhere, 1, 3) %>% set_right_padding(everywhere, 1, 3) %>%
+            #set_top_padding(everywhere, everywhere, 3) %>% set_bottom_padding(everywhere, everywhere, 3) %>%
+            #set_top_padding((n_row-1):n_row, everywhere, 0) %>% set_bottom_padding((n_row-2):n_row, everywhere, 0) %>%
+            #set_number_format(everywhere, 5, list(function(x) prettyNum(x, big.mark=","))) 
         
-        valign(all.results) = "middle"
-        HTML(huxtable::to_html(all.results))
+        #valign(all.results) = "middle"
+        #HTML(huxtable::to_html(all.results))
+        
+        results[,5] = as.numeric(results[,5])
+        row.names(results) = NULL
+        results %>% knitr::kable(format="html", format.args=list(big.mark = ',')) %>% kable_styling(full_width=F) %>%
+            add_footnote(c("<small>*Coefficient estimates with standard errors in parantheses (bolded entries are significant at a 0.05 level)<small>",
+                           "<small>**Log likelihoods (a larger likelihood indicates a better model fit)<small>", 
+                           "<small>***P-values from the likelihood ratio test of the model with the nested model below it<small>"), 
+                         notation="none", escape=F) %>%
+            column_spec(c(2:6), width="5cm") %>% column_spec(1, width="10cm")
+        
     })
     
     # select a specific model
@@ -449,17 +523,10 @@ server <- function(input, output) {
         
         match = which(Names()==input$model)
         
-        if (input$nestedRE==TRUE){
-            models = c(slopes()[[2]], mouse_slope()[[2]], mouse_()[[2]],
-                       mouse_int()[[2]], noRE()[[2]])
-        } else {
-            models = c(mouse_()[[2]], mouse_int()[[2]], noRE()[[2]])
-        }
-        
         if (input$model=="No Random Effects"){
             return(summ(noRE()[[2]], groups.table=F))
         } else {
-            return(summ(models[[match]], groups.table=F))
+            return(summ(Models()[[match]], groups.table=F))
         }
     })
     
@@ -470,57 +537,84 @@ server <- function(input, output) {
                     choices=c('', Names()))
     })
     
+    # Diagnostic Plots
+    
+    output$resid_plot <- renderPlotly({
+        req(dataProcessed())
+        data = dataProcessed()
+        
+        Time = model.frame(Models()[[1]])[[paste(input$timeVar)]]
+        Model = rep(Names(), each=length(Time))
+        
+        if (input$nestedRE==TRUE){
+            RE = model.frame(Models()[[1]])[[paste(input$mouse)]]
+        } else {
+            RE = model.frame(Models()[[1]])[[paste(input$re)]]
+        }
+        
+        Residuals = lapply(Models(), FUN=residuals)
+        Residuals = unlist(Residuals)
+        
+        resid_data = data.frame(Time, RE, Residuals, Model)
+        resid_data$Model = factor(resid_data$Model, levels=rev(Names()))
+        
+        # time vs residuals to determine need for random effects
+        ggplot(resid_data, aes(x=Time, y=Residuals)) + theme_bw(base_size=12) +
+            geom_line(aes(group=RE)) + facet_wrap(~Model, ncol=2)
+    })
+    
     # Trendlines
     
-    output$trendlines <- renderPlot({
-        req(dataProcessed(), input$model2)
+    output$trendlines <- renderPlotly({
+        req(dataProcessed(), input$model2, Names(), Models())
         data = dataProcessed()
         
         # determine which model was selected from the dropdown menu
         match = which(Names()==input$model2)
-        
-        if (input$nestedRE==TRUE){ #model choices for nested data
-            models = c(slopes()[[2]], mouse_slope()[[2]], mouse_()[[2]],
-                       mouse_int()[[2]], noRE()[[2]])
-        } else { #model choices for non-nested data
-            models = c(mouse_()[[2]], mouse_int()[[2]], noRE()[[2]])
-        }
+        model = Models()[[match]]
         
         if ((match==3 || match==4) && input$nestedRE==TRUE){ #mouse plot for nested data with no donor models
-            return(mouse_lines(models[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse))
-            
+            plot5 = mouse_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
+  
         } else if (input$model2=="No Random Effects" && input$nestedRE==TRUE){ #plot for no random effects model (nested)
-            return(donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$donor))
+            plot5 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$donor)
             
         } else if (input$model2=="No Random Effects" && input$nestedRE==FALSE){ #plot for no random effects model (non-nested)
-            return(donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$re))
+            plot5 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$re)
             
         } else if ((match==1 || match==2) && input$nestedRE==TRUE){ #donor plot for nested data with donor models
-            return(donor_lines(models[[match]], data, input$response, input$timeVar, input$groupVar, input$donor))
+            plot5 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor)
             
         } else { #plot for non-nested data
-            return(donor_lines(models[[match]], data, input$response, input$timeVar, input$groupVar, input$re))
+            plot5 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$re)
         }
+        
+        ggplotly(plot5) %>%
+            add_annotations(text=paste(input$donor), xref="paper", yref="paper",
+                            x=1.02, xanchor="left", y=0.8, yanchor="bottom", 
+                            legendtitle=TRUE, showarrow=FALSE) %>%
+            layout(legend=list(y=0.05, yanchor="top"))
     })
     
-    output$trendlines2 <- renderPlot({
+    output$trendlines2 <- renderPlotly({
         req(dataProcessed(), input$model2, input$nestedRE) #requires nested data
         data = dataProcessed()
         
         # determine which model was selected from the dropdown menu
         match = which(Names()==input$model2)
         
-        # model choices for nested data
-        models = c(slopes()[[2]], mouse_slope()[[2]], mouse_()[[2]],
-                   mouse_int()[[2]], noRE()[[2]])
-        
         if (match==3 || match==4 || match==5){ #don't show plot for nested data with no donor models
             return(NULL)
             
         } else { #mouse plot for nested data with donor models
-            return(mouse_lines(models[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse))
+            plot6 = mouse_lines(Models()[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
+            
+            ggplotly(plot6) %>%
+                add_annotations(text=paste(input$donor), xref="paper", yref="paper",
+                                x=1.02, xanchor="left", y=0.8, yanchor="bottom", 
+                                legendtitle=TRUE, showarrow=FALSE) %>%
+                layout(legend=list(y=0.05, yanchor="top"))
         }
-        
     })
 }
 

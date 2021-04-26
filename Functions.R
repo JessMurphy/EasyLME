@@ -179,6 +179,30 @@ REint_model <- function(data, y, time, group, re, covariates=""){
   return(list(REint_name, REint_mod))
 }
 
+# function for results table
+# inputs: a list of models, a vector of pvalues, and a list of model names
+# output: a data frame of the results
+
+results_table <- function(models, pvalues, names){
+  
+  out = c()
+  for (i in 1:length(models)){
+    
+    est = round(summary(models[[i]])$coefficients[-1,1], 2)
+    se = round(summary(models[[i]])$coefficients[-1,2], 2)
+    log = round(logLik(models[[i]]), 2)
+    
+    temp = c(paste0(est, " (", se, ")"), log)
+    out = rbind(out, temp)
+  }
+  
+  results = data.frame(names, out, pvalues)
+  colnames(results) = c("Model", "Group*", "Time*", "Interaction*", "Likelihood**", "Pvalue***")
+  #row.names(results) = names
+  
+  return(results)
+}
+
 
 # function for donor fitted lines
 # inputs: a model object as well as a data frame and variable names
@@ -209,9 +233,9 @@ donor_lines = function(model, data, y, time, group, donor){
   
   # determine the intercept, slope, and donor status for each donor
   for(i in 1:length(donors)){
-    Intercept = donor_coef[i,1] + (data[data[[donor]] == donors[i],][[group]] == levels(data[[group]])[2])[1]*donor_coef[i,2]
-    Slope = donor_coef[i,3] + (data[data[[donor]] == donors[i],][[group]] == levels(data[[group]])[2])[1]*donor_coef[i,4]
-    Status = ifelse((data[data[[donor]] == donors[i],][[group]] == levels(data[[group]])[1])[1], levels(data[[group]])[1], levels(data[[group]])[2])
+    Intercept = donor_coef[i,1] + (data[data[[paste(donor)]] == donors[i],][[paste(group)]] == levels(data[[paste(group)]])[2])[1]*donor_coef[i,2]
+    Slope = donor_coef[i,3] + (data[data[[paste(donor)]] == donors[i],][[paste(group)]] == levels(data[[paste(group)]])[2])[1]*donor_coef[i,4]
+    Status = ifelse((data[data[[paste(donor)]] == donors[i],][[paste(group)]] == levels(data[[paste(group)]])[1])[1], levels(data[[paste(group)]])[1], levels(data[[paste(group)]])[2])
     
     intercepts = c(intercepts, Intercept)
     slopes = c(slopes, Slope)
@@ -219,7 +243,8 @@ donor_lines = function(model, data, y, time, group, donor){
   }
   
   # create data frame with info needed for fitted lines
-  donor_data = as.data.frame(cbind(donors, Group, as.numeric(as.character(intercepts)), as.numeric(as.character(slopes))))
+  donor_data = data.frame(donors, Group, intercepts=as.numeric(as.character(intercepts)), slopes=as.numeric(as.character(slopes)))
+  donor_data$donors = factor(donor_data$donors, levels=levels(data[[paste(donor)]]))
   
   # specify color vector (Donor) and title for plot
   Donor = data[[paste(donor)]]
@@ -227,9 +252,10 @@ donor_lines = function(model, data, y, time, group, donor){
   
   # create scatterplot with fitted lines (color based on donor, type based on group)
   p = ggplot() + 
-    geom_point(aes(x=data[[time]], y=data[[y]], color=Donor), size=2.1) +
-    geom_abline(data=donor_data, aes(intercept=intercepts, slope=slopes, color=donors, linetype=Group), size=1) +
-    theme_bw(base_size=17) + labs(x=time, y=y, title=title, color=paste(donor))
+    geom_point(aes(x=data[[paste(time)]], y=data[[paste(y)]], color=Donor), show.legend=FALSE) +
+    geom_abline(data=donor_data, aes(intercept=intercepts, slope=slopes, color=donors, linetype=Group)) +
+    theme_bw() + labs(x=paste(time), y=paste(y)) + guides(color=FALSE) +
+    theme(legend.title=element_blank())
   
   return(p)
 }
@@ -310,11 +336,11 @@ mouse_lines = function(model, data, y, time, group, donor, mouse){
   
   # determine the intercept, slope, and donor status for each mouse
   for(i in 1:length(mice)){
-    Intercept = fix_effects[1] + (data[data[[mouse]] == mice[i],][[group]] == levels(data[[group]])[2])[1]*fix_effects[2] +
+    Intercept = fix_effects[1] + (data[data[[paste(mouse)]] == mice[i],][[paste(group)]] == levels(data[[paste(group)]])[2])[1]*fix_effects[2] +
       mouse_int[i] + donor_int[i]
-    Slope = fix_effects[3] + (data[data[[mouse]] == mice[i],][[group]] == levels(data[[group]])[2])[1]*fix_effects[4] +
+    Slope = fix_effects[3] + (data[data[[paste(mouse)]] == mice[i],][[paste(group)]] == levels(data[[paste(group)]])[2])[1]*fix_effects[4] +
       mouse_slope[i] + donor_slope[i]
-    Status = ifelse((data[data[[mouse]] == mice[i],][[group]] == levels(data[[group]])[1])[1], levels(data[[group]])[1], levels(data[[group]])[2])
+    Status = ifelse((data[data[[paste(mouse)]] == mice[i],][[paste(group)]] == levels(data[[paste(group)]])[1])[1], levels(data[[paste(group)]])[1], levels(data[[paste(group)]])[2])
     
     intercepts = c(intercepts, Intercept)
     slopes = c(slopes, Slope)
@@ -322,7 +348,9 @@ mouse_lines = function(model, data, y, time, group, donor, mouse){
   }
   
   # create data frame with info needed for fitted lines
-  type_data = as.data.frame(cbind(mice, donors, Group, as.numeric(as.character(intercepts)), as.numeric(as.character(slopes))))
+  type_data = data.frame(mice, donors, Group, intercepts=as.numeric(as.character(intercepts)), slopes=as.numeric(as.character(slopes)))
+  type_data$donors = factor(type_data$donors, levels=levels(data[[paste(donor)]]))
+  type_data$mice = factor(type_data$mice, levels=levels(data[[paste(mouse)]]))
   
   # specify color vector (Donor) and title for plot
   Donor = as.factor(data[[paste(donor)]]) 
@@ -330,8 +358,10 @@ mouse_lines = function(model, data, y, time, group, donor, mouse){
   
   # create scatterplot with fitted lines (color based on donor, type based on group)
   p = ggplot() + 
-    geom_point(aes(x=data[[time]], y=data[[y]], color=Donor), size=2.1) +
-    geom_abline(data=type_data, aes(intercept=intercepts, slope=slopes, color=donors, linetype=Group), size=1) +
-    theme_bw(base_size=17) + labs(x=time, y=y, title=title, color=paste(donor))
+    geom_point(aes(x=data[[paste(time)]], y=data[[paste(y)]], color=Donor), show.legend=FALSE) +
+    geom_abline(data=type_data, aes(intercept=intercepts, slope=slopes, color=donors, linetype=Group)) +
+    theme_bw() + labs(x=paste(time), y=paste(y)) + guides(color=FALSE) +
+    theme(legend.title=element_blank())
+  
   return(p)
 }
