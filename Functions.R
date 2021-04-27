@@ -1,6 +1,13 @@
 
 ##### DEFINE FUNCTIONS #####
 
+summary_table <- function(data, y, time, group, donor, mouse, covariates=""){
+  
+  num_sum = data %>% group_by(!!donor, !!group) %>% 
+    summarize(across(!!time:!!y, list(min=min, median=median, max=max, mean=mean, sd=sd)), count=n()) #%>%
+    mutate(across(time_min:y_sd, ~formatC(.x, format="f", digits=1)))
+}
+
 # functions for fitting mixed effects models to nested data
 # inputs: data - data frame containing the variables of interest
 #         y - variable name (character)
@@ -29,7 +36,7 @@ slopes_model <- function(data, y, time, group, donor, mouse, covariates=""){
     slopes_formula = as.formula(paste(fixed, slope_donor, slope_mouse, sep="+"))
   }
   #fit model
-  slopes = lme4::lmer(slopes_formula, data)
+  slopes = lmerTest::lmer(slopes_formula, data)
   
   #output list with model and model name
   return(list(slopes_name, slopes))
@@ -54,7 +61,7 @@ mouse_slope_model <- function(data, y, time, group, donor, mouse, covariates="")
     mouse_slope_formula = as.formula(paste(fixed, int_donor, slope_mouse, sep="+"))
   }
   #fit model
-  mouse_slope = lme4::lmer(mouse_slope_formula, data)
+  mouse_slope = lmerTest::lmer(mouse_slope_formula, data)
   
   #output list with model and model name
   return(list(mouse_slope_name, mouse_slope))
@@ -78,7 +85,7 @@ mouse_model <- function(data, y, time, group, donor, mouse, covariates=""){
     mouse_formula = as.formula(paste(fixed, slope_mouse, sep="+"))
   }
   #fit model
-  mouse_ = lme4::lmer(mouse_formula, data)
+  mouse_ = lmerTest::lmer(mouse_formula, data)
   
   #output list with model and model name
   return(list(mouse_name, mouse_))
@@ -102,7 +109,7 @@ mouse_int_model <- function(data, y, time, group, donor, mouse, covariates=""){
     int_formula = as.formula(paste(fixed, int_mouse, sep="+"))
   }
   #fit model
-  mouse_int = lme4::lmer(int_formula, data)
+  mouse_int = lmerTest::lmer(int_formula, data)
   
   #output list with model and model name
   return(list(mouse_int_name, mouse_int))
@@ -149,7 +156,7 @@ REslope_model <- function(data, y, time, group, re, covariates=""){
     REslope_formula = as.formula(paste(fixed, REslope, sep="+"))
   }
   #fit model
-  REslope_mod = lme4::lmer(REslope_formula, data)
+  REslope_mod = lmerTest::lmer(REslope_formula, data)
   
   #output list with model and model name
   return(list(REslope_name, REslope_mod))
@@ -173,7 +180,7 @@ REint_model <- function(data, y, time, group, re, covariates=""){
     REint_formula = as.formula(paste(fixed, REint, sep="+"))
   }
   #fit model
-  REint_mod = lme4::lmer(REint_formula, data)
+  REint_mod = lmerTest::lmer(REint_formula, data)
   
   #output list with model and model name
   return(list(REint_name, REint_mod))
@@ -185,22 +192,30 @@ REint_model <- function(data, y, time, group, re, covariates=""){
 
 results_table <- function(models, pvalues, names){
   
-  out = c()
+  out = p = c()
   for (i in 1:length(models)){
     
-    est = round(summary(models[[i]])$coefficients[-1,1], 2)
-    se = round(summary(models[[i]])$coefficients[-1,2], 2)
+    mod.sum = summary(models[[i]])$coefficients
+    
+    est = round(mod.sum[-1, "Estimate"], 2)
+    se = round(mod.sum[-1, "Std. Error"], 2)
+    pval = mod.sum[-1, "Pr(>|t|)"]
     log = round(logLik(models[[i]]), 2)
     
     temp = c(paste0(est, " (", se, ")"), log)
     out = rbind(out, temp)
+    p = rbind(p, pval)
   }
   
   results = data.frame(names, out, pvalues)
   colnames(results) = c("Model", "Group*", "Time*", "Interaction*", "Likelihood**", "Pvalue***")
-  #row.names(results) = names
+  rownames(results) = NULL
   
-  return(results)
+  results2 = data.frame(names, p)
+  colnames(results2) = c("Model", "Group*", "Time*", "Interaction*")
+  rownames(results2) = NULL
+  
+  return(list(results, results2))
 }
 
 
