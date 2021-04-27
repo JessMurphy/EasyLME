@@ -30,7 +30,7 @@ library(table1)
 library(kableExtra)
 
 # Define UI ----
-ui <- fluidPage(
+ui <- fixedPage(
     
     # application title
     titlePanel("EasyLME"),
@@ -120,12 +120,13 @@ ui <- fluidPage(
                 tabPanel(title="Fitted Lines", h3(""),
                          uiOutput("selectModel2"),
                          plotlyOutput("trendlines"), h3(""),
-                         h5(strong("Figure 5. Fitted lines for the clustered random effect variable."),
-                            "This plot is useful for visualizing how the inclusion of a random slope and/or
-                            intercept affects the model fit for the clustered random effect variable. If the
-                            data are not nested or the model contains only one random effect variable, this 
-                            plot will just show the fitted lines for the specified random effect."),
-                         conditionalPanel(condition="input.nestedRE",
+                         conditionalPanel(condition="input.model2",
+                                          h5(strong("Figure 5. Fitted lines for the clustered random effect variable."),
+                                          "This plot is useful for visualizing how the inclusion of a random slope and/or
+                                          intercept affects the model fit for the clustered random effect variable. If the
+                                          data are not nested or the model contains only one random effect variable, this 
+                                          plot will just show the fitted lines for the specified random effect.")),
+                         conditionalPanel(condition="input.model2 && input.nestedRE",
                                           plotlyOutput("trendlines2"), h3(""),
                                           h5(strong("Figure 6. Fitted lines for the nested random effect variable."),
                                              "This plot is useful for visualizing how the inclusion of a random slope and/or
@@ -277,17 +278,16 @@ server <- function(input, output) {
             data2[[input$mouse]] = factor(data2[[input$mouse]], levels=unique(data2[[input$mouse]]))
             
         } else if (input$nestedRE==FALSE){
+          
+          req(input$re)
             
             # relevel random effect variable by decreasing response variable
             max_re = data %>% group_by(!!input$re) %>% summarize(max=max(!!input$response, na.rm=T)) %>% arrange(desc(max))
             data[[input$re]] = factor(data[[input$re]], levels=max_re[[input$re]])
             
-            #print(data[[input$re]])
-            
-            # remove response na values & arrange by donor variable
+            # remove response na values & arrange by random effect variable
             data2 = data %>% drop_na(!!input$response) %>% arrange(!!input$re)
         }
-        #print(head(max_re))
         data2
     })
     
