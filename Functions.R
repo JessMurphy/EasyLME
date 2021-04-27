@@ -1,20 +1,66 @@
 
 ##### DEFINE FUNCTIONS #####
 
-summary_table <- function(data, y, time, group, donor, mouse, covariates=""){
+# function for producing a summary table of the input data
+# inputs: data - data frame containing the variables of interest
+#         y - response variable name (character)
+#         time - time variable name (character)
+#         group - grouping variable name (character)
+#         re - random effect variable name (character)
+#         covariates - optional covariate variable names (character)
+# output: a data frame
+
+summary_table <- function(data, y, time, group, re, covariates=""){
   
-  num_sum = data %>% group_by(!!donor, !!group) %>% 
-    summarize(across(!!time:!!y, list(min=min, median=median, max=max, mean=mean, sd=sd)), count=n()) #%>%
-    mutate(across(time_min:y_sd, ~formatC(.x, format="f", digits=1)))
+  # extract the levels of the random effect variable
+  donors = levels(data[[re]])
+  
+  out2 = c()
+  for (i in 1:length(donors)){ # loop through the random effect levels
+    
+    # subset the data by random effect level
+    temp = data[data[[paste(re)]] == donors[i],]
+    
+    # store information about the subsetted data
+    donor = rep(donors[i], 2)
+    status = rep(as.character(temp[[group]][1]), 2)
+    count = rep(nrow(temp), 2)
+    variable = c(time, y)
+    
+    # calculate summary statistics for the numeric variables (time & response)
+    min = c(min(temp[[time]]), min(temp[[y]]))
+    median = c(median(temp[[time]]), median(temp[[y]]))
+    max = c(max(temp[[time]]), max(temp[[y]]))
+    mean = c(mean(temp[[time]]), mean(temp[[y]]))
+    sd = c(sd(temp[[time]]), sd(temp[[y]]))
+    
+    # combine information into a data frame
+    out = data.frame(donor, status, count, variable, min, median, max, mean, sd)
+    out2 = rbind(out2, out)
+  }
+  
+  # calculate the percentage of observations per random effect level & format the numeric values
+  num_sum = out2 %>% mutate(percent=(out2$count/(sum(out2$count)/2))*100, across(min:percent, ~formatC(.x, format="f", digits=1)))
+  
+  # combine the mean/sd into one variable, the min/median/max into another variable, and the count/percentage into another
+  num_sum2 = num_sum %>% mutate(mean=paste0(mean, " (", sd, ")"), median=paste0(median, " [", min, ", ", max, "]"),
+                                count=paste0(count, " (", percent, "%)")) %>% select(-c(min, max, sd, percent))
+  
+  # rename the columns
+  colnames(num_sum2) = c(re, group, "Count", "Variable", "Mean (SD)", "Median [Min, Max]")
+  
+  return(num_sum2)
 }
+
 
 # functions for fitting mixed effects models to nested data
 # inputs: data - data frame containing the variables of interest
-#         y - variable name (character)
-#         time - variable name (character)
-#         group - variable name (character)
-#         donor - variable name (character)
-#         mouse - variable name (character)
+#         y - response variable name (character)
+#         time - time variable name (character)
+#         group - grouping variable name (character)
+#         donor - clustered random effect variable name (character)
+#         mouse - nested random effect variable name (character)
+#         covariates - optional covariate variable names (character)
 # output: model object
 
 # create a model with random slopes and random intercepts for both donor and mouse
