@@ -82,9 +82,8 @@ ui <- fixedPage(
                 
                 tabPanel(title="Welcome", includeHTML("Welcome.html")),
                 
-                tabPanel(title="Data Summary",
-                         uiOutput("summaries"), 
-                         includeCSS("table1_defaults.css")),
+                tabPanel(title="Data Summary", h3(""),
+                         htmlOutput("summaries")),
                 
                 tabPanel(title="Exploratory Plots",
                          plotlyOutput("scatterplot"), h3(""),
@@ -103,7 +102,7 @@ ui <- fixedPage(
                                           "These plots can help determine if a random slope and/or random intercept would be 
                                           appropriate for the nested random effect variable."))),
                 
-                tabPanel(title="Model Results", h4("Model Comparison Table"),
+                tabPanel(title="Model Results", h3(""),
                          htmlOutput("results_table"),
                          uiOutput("selectModel"),
                          conditionalPanel(
@@ -301,20 +300,23 @@ server <- function(input, output) {
     
     # Data Summary
     
-    output$summaries <- renderUI({
+    output$summaries <- renderText({
         req(dataProcessed())
         data = dataProcessed()
         
         if (input$nestedRE==FALSE){
-            data_sum = data %>% dplyr::select(!!input$response, !!input$timeVar, !!input$groupVar, !!input$re, !!!input$Covar)
+            data_sum = summary_table(data, input$response, input$timeVar, input$groupVar, input$re, input$Covar)
         }
         if (input$nestedRE==TRUE){
-            data_sum = data %>% dplyr::select(!!input$response, !!input$timeVar, !!input$groupVar, !!input$donor, !!input$mouse, !!!input$Covar)
+            data_sum = summary_table(data, input$response, input$timeVar, input$groupVar, input$donor, input$Covar)
         }
-        vars = paste(names(data_sum), collapse="+")
-        formula = as.formula(paste("~", vars))
-        sum = print(table1(formula, data))
-        return(sum)
+        
+        time = paste(input$timeVar)
+        y = paste(input$response)
+        
+        data_sum %>% knitr::kable(format="html", align=c(rep('c', ncol(data_sum)))) %>% 
+          kable_styling(bootstrap_options=c("striped", "hover", "responsive")) %>%
+          add_header_above(c(" "=3, setNames(2, time), setNames(2, y)))
     })
     
     # Exploratory Plots
@@ -498,8 +500,9 @@ server <- function(input, output) {
         }
         
         results[[1]][,5] = as.numeric(results[[1]][,5])
-        results[[1]] %>% knitr::kable(format="html", format.args=list(big.mark = ','), align=c('l', rep('c', 5))) %>% kable_styling(full_width=F) %>%
-            add_footnote(c("<small>*Coefficient estimates with standard errors in parantheses (bolded entries are significant at a 0.05 level)<small>",
+        results[[1]] %>% knitr::kable(format="html", format.args=list(big.mark = ','), align=c(rep('c', ncol(results[[1]])))) %>% 
+          kable_styling(bootstrap_options=c("striped", "hover", "responsive"), full_width=F) %>%
+            add_footnote(c(" ", "<small>*Coefficient estimates with standard errors in parantheses (bolded entries are significant at a 0.05 level)<small>",
                            "<small>**Log likelihoods (a larger likelihood indicates a better model fit)<small>", 
                            "<small>***P-values from the likelihood ratio test of the model with the nested model below it<small>"), 
                          notation="none", escape=F) %>%
