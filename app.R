@@ -341,6 +341,37 @@ server <- function(input, output) {
             layout(legend=list(y=0.9, yanchor="top"))
     })
     
+    # average trendlines per donor
+    output$avg_trend <- renderPlotly({
+      req(dataProcessed())
+      data = dataProcessed()
+      
+      if (input$nestedRE==TRUE){
+        req(input$donor)
+        donor = input$donor
+        
+      } else {
+        req(input$re)
+        donor = input$re
+      }
+      
+      avg_donors = data %>% group_by(!!donor, !!input$timeVar) %>% 
+        summarize(Avg=mean(!!input$response), Group=first(!!input$groupVar))
+      
+      title = paste(donor, "Trendlines", sep=" ")
+      
+      plot3 = ggplot() +
+        geom_line(avg_donors, mapping=aes(x=!!input$timeVar, y=Avg, color=!!donor, linetype=Group), lwd=0.75) +
+        theme_bw(base_size=12) + labs(y=paste(input$response), linetype=paste(input$GroupVar)) +
+        theme(legend.title=element_blank())
+      
+      ggplotly(plot3) %>%
+        add_annotations(text=paste(donor), xref="paper", yref="paper",
+                        x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
+                        legendtitle=TRUE, showarrow=FALSE) %>%
+        layout(legend=list(y=0.9, yanchor="top"))
+    })
+    
     # mouse trendlines faceted by donor 
     output$facet_plots <- renderPlotly({
         req(dataProcessed(), input$timeVar, input$response, input$nestedRE) #requires nested data
@@ -356,62 +387,7 @@ server <- function(input, output) {
                             legendtitle=TRUE, showarrow=FALSE) %>%
             layout(legend=list(y=0.9, yanchor="top"))
     })
-    
-    # trendlines per donor
-    output$avg_trend <- renderPlotly({
-        req(dataProcessed())
-        data = dataProcessed()
-        
-        if (input$nestedRE==TRUE){
-            req(input$donor)
-            donor = input$donor
-        } else {
-            req(input$re)
-            donor = input$re
-        }
-        
-        donors = levels(data[[donor]])
-        avg_donors = c()
-        
-        for (i in 1:length(donors)) {
-            
-            avg_weight = data %>% filter(!!donor == donors[i]) %>% group_by(!!input$timeVar) %>% summarize(mean(!!input$response))
-            colnames(avg_weight) = c("Time", donors[i])
-            
-            if (i==1) {
-                avg_donors = avg_weight
-            } else {
-                avg_donors = full_join(avg_donors, avg_weight, by="Time")
-            }
-        }
-        
-        avg_donors2 = gather(avg_donors, Donor, !!input$response, -Time)
-        
-        group = data %>% dplyr::select(!!donor, !!input$groupVar) %>% distinct(!!donor, .keep_all = T)
-        group[[donor]] = as.character(group[[donor]])
-        group[[input$groupVar]] = as.character(group[[input$groupVar]])
-        
-        times = length(unique(data[[input$timeVar]]))
-        
-        group2 = data.frame(Donor=rep(group[[donor]], each=times), Group=rep(group[[input$groupVar]], each=times))
-        
-        avg_donor_data = avg_donors2 %>% mutate(Group=group2$Group)
-        avg_donor_data$Donor = factor(avg_donor_data$Donor, levels=donors)
-        
-        title = paste(donor, "Trendlines", sep=" ")
-        
-        plot3 = ggplot() +
-            geom_line(avg_donor_data, mapping=aes(x=Time, y=!!input$response, color=Donor, linetype=Group), lwd=0.75) +
-            theme_bw(base_size=12) + guides(color=guide_legend(donor), linetype=guide_legend(input$GroupVar)) +
-          theme(legend.title=element_blank())
-        
-        ggplotly(plot3) %>%
-            add_annotations(text=paste(donor), xref="paper", yref="paper",
-                            x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
-                            legendtitle=TRUE, showarrow=FALSE) %>%
-            layout(legend=list(y=0.9, yanchor="top"))
-    })
-    
+
     # Model Results
     
     # fit models based on input selections (returns a list with 1-model name and 2-model)
