@@ -18,15 +18,11 @@ library(shiny)
 library(lme4)
 library(lmerTest)
 library(dplyr)
-library(tidyr) #gather
+library(tidyr) #gather, drop_na
 library(ggplot2)
 library(plotly)
-library(gridExtra)
-library(huxtable)
 library(broom.mixed)
 library(jtools) #export_summs, summ
-library(table1)
-#library(pbkrtest)
 library(kableExtra)
 
 # Define UI ----
@@ -125,11 +121,11 @@ ui <- fixedPage(
                                           intercept affects the model fit for the clustered random effect variable. If the
                                           data are not nested or the model contains only one random effect variable, this 
                                           plot will just show the fitted lines for the specified random effect.")),
-                         conditionalPanel(condition="input.model2 && input.nestedRE",
+                         conditionalPanel(condition="(input.model2 && input.nestedRE)",
                                           plotlyOutput("trendlines2"), h3(""),
                                           h5(strong("Figure 6. Fitted lines for the nested random effect variable."),
-                                             "This plot is useful for visualizing how the inclusion of a random slope and/or
-                                             intercept affects the model fit for the nested random effect variable."))))
+                                          "This plot is useful for visualizing how the inclusion of a random slope and/or
+                                          intercept affects the model fit for the nested random effect variable."))))
         )
     )
 )
@@ -406,7 +402,8 @@ server <- function(input, output) {
         
         plot3 = ggplot() +
             geom_line(avg_donor_data, mapping=aes(x=Time, y=!!input$response, color=Donor, linetype=Group), lwd=0.75) +
-            theme_bw(base_size=12) + theme(legend.title=element_blank())
+            theme_bw(base_size=12) + guides(color=guide_legend(donor), linetype=guide_legend(input$GroupVar)) +
+          theme(legend.title=element_blank())
         
         ggplotly(plot3) %>%
             add_annotations(text=paste(donor), xref="paper", yref="paper",
@@ -617,6 +614,8 @@ server <- function(input, output) {
                 layout(legend=list(y=0.9, yanchor="top"))
         }
     })
+    
+    #outputOptions(output, "trendlines2", suspendWhenHidden = FALSE)
 }
 
 # Run the app ----
