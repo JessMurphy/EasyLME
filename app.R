@@ -4,7 +4,6 @@
 #   https://github.com/strengejacke/sjPlot/issues/392
 #  -model results tab not working: Warning: Error in : No tidy method for objects of class lmerMod (broom.mixed library)
 #  -summ function doesn't work (can't use pval=T)
-#  -conditional panel for mouse boxplot breaks app on server 
 
 # options(shiny.error = browser)
 
@@ -12,7 +11,7 @@
 # TO DO: 
 #  -colorblind friendly palette for plots
 #  -change variable inputs so nothing is selected when data is first uploaded
-#  -should the type of the covariates be specified (if the variable name contains age or sex make it a factor?)
+#  -add covariates to summary table
 
 library(shiny)
 library(lme4)
@@ -83,18 +82,14 @@ ui <- fixedPage(
                 
                 tabPanel(title="Exploratory Plots",
                          plotlyOutput("scatterplot"), h3(""),
-                         h5(strong("Figure 1. Scatterplot of the response variable vs time."),
+                         h5(strong("Figure 1. Scatterplot of the response variable vs time."), br(),
                             "This plot can be used to verify the linearity assumption between the response 
                             variable and time before proceeding with a linear mixed effects model."),
                          plotlyOutput("avg_trend"), h3(""),
-                         h5(strong("Figure 2. Average trendlines for the clustered random effect variable."),
-                            "This plot can help determine if a random slope and/or random intercept would be appropriate 
-                            for the clustered random effect variable. Missing data can also be identified by gaps in
-                            the lines or truncated lines. If the data are not nested, this plot will just show the 
-                            trendlines for the specified random effect without the need for averaging"), h3(""),
+                         h5(strong(textOutput("figure2")), textOutput("legend2")), h3(""),
                          plotlyOutput("facet_plots", height="600px"),
                          conditionalPanel(condition="input.nestedRE",
-                                          h5(strong("Figure 3. Trendlines faceted by the clustered random effect variable."),
+                                          h5(strong("Figure 3. Trendlines faceted by the clustered random effect variable."), br(),
                                           "These plots can help determine if a random slope and/or random intercept would be 
                                           appropriate for the nested random effect variable."))),
                 
@@ -107,25 +102,19 @@ ui <- fixedPage(
                 
                 tabPanel(title="Diagnostic Plots",
                          plotlyOutput("resid_plot", height="800px"), h3(""),
-                         h5(strong("Figure 4. Residual profile plots in increasing order of model complexity."),
-                            "These plots are useful to visually compare the different model fits. Models with a 
-                            large, nonconstant range in residuals over time indicate a worse model fit, whereas 
-                            models with a small, constant range in residuals over time indicate a better model fit.")),
+                         h5(strong("Figure 4. Residual profile plots in increasing order of model complexity,"),
+                            "where each line represents a single profile of the random effect variable.
+                            These plots are useful to visually compare the different model fits. Models with a 
+                            large, nonconstant variability in the residuals over time indicate a worse model fit, whereas 
+                            models with a small, constant variability in the residuals over time indicate a better model fit.")),
                 
                 tabPanel(title="Fitted Lines", h3(""),
                          uiOutput("selectModel2"),
                          plotlyOutput("trendlines"), h3(""),
-                         conditionalPanel(condition="input.model2",
-                                          h5(strong("Figure 5. Fitted lines for the clustered random effect variable."),
-                                          "This plot is useful for visualizing how the inclusion of a random slope and/or
-                                          intercept affects the model fit for the clustered random effect variable. If the
-                                          data are not nested or the model contains only one random effect variable, this 
-                                          plot will just show the fitted lines for the specified random effect.")),
+                         h5(strong(textOutput("figure5")), textOutput("legend5")),
                          conditionalPanel(condition="(input.model2 && input.nestedRE)",
                                           plotlyOutput("trendlines2"), h3(""),
-                                          h5(strong("Figure 6. Fitted lines for the nested random effect variable."),
-                                          "This plot is useful for visualizing how the inclusion of a random slope and/or
-                                          intercept affects the model fit for the nested random effect variable."))))
+                                          h5(strong(textOutput("figure6")), textOutput("legend6")))))
         )
     )
 )
@@ -372,6 +361,35 @@ server <- function(input, output) {
         layout(legend=list(y=0.9, yanchor="top"))
     })
     
+    # Figure 2 legend
+    text2 <- reactive({
+      req(dataProcessed())
+      
+      if (input$nestedRE==TRUE){ #only show legend for nested data with donor models
+        
+        title = "Figure 2. Average trendlines for the clustered random effect variable."
+        text = "This plot can help determine if a random slope and/or random intercept would be appropriate 
+                for the clustered random effect variable. Missing data can also be identified by gaps in
+                the lines or truncated lines."
+      } else {
+        
+        title = "Figure 2. Trendlines for the random effect variable."
+        text = "This plot can help determine if a random slope and/or random intercept would be appropriate 
+                for the random effect variable. Missing data can also be identified by gaps in
+                the lines or truncated lines."
+      }
+      
+      list(title, text)
+    })
+    
+    output$figure2 <- function() {
+      text2()[[1]]
+    }
+    
+    output$legend2 <- function() {
+      text2()[[2]]
+    }
+    
     # mouse trendlines faceted by donor 
     output$facet_plots <- renderPlotly({
         req(dataProcessed(), input$timeVar, input$response, input$nestedRE) #requires nested data
@@ -570,26 +588,101 @@ server <- function(input, output) {
             layout(legend=list(y=0.9, yanchor="top"))
     })
     
+    text5 <- reactive({
+      req(dataProcessed(), input$model2, Names())
+      
+      # determine which model was selected from the dropdown menu
+      match = which(Names()==input$model2)
+      
+      if ((match==3 || match==4) && input$nestedRE==TRUE){ #nested data & model with just one random effect
+        
+        title = "Figure 5. Fitted lines for the nested random effect variable."
+        text = "This plot is useful for visualizing how the inclusion of a random slope and/or
+                intercept affects the model fit for the nested random effect variable."
+      
+      } else if (input$model2=="No Random Effects"){ #model with no random effects
+        
+        title = "Figure 5. Fitted lines for the grouping variable."
+        text = "This plot is useful for visualizing how the inclusion of a random slope and/o
+                intercept affects the model fit for the grouping variable."
+      
+      } else if ((match==1 || match==2) && input$nestedRE==TRUE){ #nested data & model with both random effects
+        
+        title = "Figure 5. Fitted lines for the clustered random effect variable."
+        text = "This plot is useful for visualizing how the inclusion of a random slope and/or
+                intercept affects the model fit for the clustered random effect variable."
+        
+      } else { #non-nested data
+        
+        title = "Figure 5. Fitted lines for the random effect variable."
+        text = "This plot is useful for visualizing how the inclusion of a random slope and/or
+                intercept affects the model fit for the random effect variable."
+      }
+      list(title, text)
+    })
+    
+    output$figure5 <- function() {
+      text5()[[1]]
+    }
+    
+    output$legend5 <- function() {
+      text5()[[2]]
+    }
+      
     output$trendlines2 <- renderPlotly({
-        req(dataProcessed(), input$model2, input$nestedRE) #requires nested data
+        req(dataProcessed(), input$model2, Names(), input$nestedRE) #requires nested data
         data = dataProcessed()
         
         # determine which model was selected from the dropdown menu
         match = which(Names()==input$model2)
         
-        if (match==3 || match==4 || match==5){ #don't show plot for nested data with no donor models
-            return(NULL)
+        req(match)
+        
+        if (match==1 || match==2){ #only show plot for nested data with donor models
             
-        } else { #mouse plot for nested data with donor models
-            plot6 = mouse_lines(Models()[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
+          plot6 = mouse_lines(Models()[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
             
-            ggplotly(plot6) %>%
-                add_annotations(text=paste(input$donor), xref="paper", yref="paper",
-                                x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
-                                legendtitle=TRUE, showarrow=FALSE) %>%
-                layout(legend=list(y=0.9, yanchor="top"))
+          ggplotly(plot6) %>%
+              add_annotations(text=paste(input$donor), xref="paper", yref="paper",
+                              x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
+                              legendtitle=TRUE, showarrow=FALSE) %>%
+              layout(legend=list(y=0.9, yanchor="top"))
+          
+        } else {
+          
+          plot6 = NULL
         }
     })
+    
+    text6 <- reactive({
+      req(dataProcessed(), input$model2, Names(), input$nestedRE)
+      
+      # determine which model was selected from the dropdown menu
+      match = which(Names()==input$model2)
+      
+      req(match)
+      
+      if (match==1 || match==2){ #only show legend for nested data with donor models
+        
+        title = "Figure 6. Fitted lines for the nested random effect variable."
+        text = "This plot is useful for visualizing how the inclusion of a random slope and/or
+                intercept affects the model fit for the nested random effect variable."
+      } else {
+        
+        title = NULL
+        text = NULL
+      }
+      
+      list(title, text)
+    })
+    
+    output$figure6 <- function() {
+      text6()[[1]]
+    }
+    
+    output$legend6 <- function() {
+      text6()[[2]]
+    }
     
     #outputOptions(output, "trendlines2", suspendWhenHidden = FALSE)
 }
