@@ -349,12 +349,12 @@ server <- function(input, output) {
       
       title = paste(donor, "Trendlines", sep=" ")
       
-      plot3 = ggplot() +
+      plot2 = ggplot() +
         geom_line(avg_donors, mapping=aes(x=!!input$timeVar, y=Avg, color=!!donor, linetype=Group), lwd=0.75) +
         theme_bw(base_size=12) + labs(y=paste(input$response), linetype=paste(input$GroupVar)) +
         theme(legend.title=element_blank())
       
-      ggplotly(plot3) %>%
+      ggplotly(plot2) %>%
         add_annotations(text=paste(donor), xref="paper", yref="paper",
                         x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
                         legendtitle=TRUE, showarrow=FALSE) %>%
@@ -395,11 +395,11 @@ server <- function(input, output) {
         req(dataProcessed(), input$timeVar, input$response, input$nestedRE) #requires nested data
         data = dataProcessed()
         
-        plot2 = ggplot(data, aes(x=!!input$timeVar, y=!!input$response, color=!!input$groupVar)) + 
+        plot3 = ggplot(data, aes(x=!!input$timeVar, y=!!input$response, color=!!input$groupVar)) + 
             geom_line(aes(group=!!input$mouse)) + facet_wrap(vars(!!input$donor)) +
             theme_bw(base_size=12) + theme(legend.title=element_blank()) + guides(size="none")
         
-        ggplotly(plot2) %>%
+        ggplotly(plot3) %>%
             add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
                             x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
                             legendtitle=TRUE, showarrow=FALSE) %>%
