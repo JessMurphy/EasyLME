@@ -16,13 +16,14 @@
 library(shiny)
 library(lme4)
 library(lmerTest)
-library(dplyr)
-library(tidyr) #gather, drop_na
-library(ggplot2)
+library(tidyverse)
+library(ggpubr)
 library(plotly)
 library(broom.mixed)
 library(jtools) #export_summs, summ
 library(kableExtra)
+library(dotwhisker) #dwplot
+
 
 # Define UI ----
 ui <- fixedPage(
@@ -52,7 +53,7 @@ ui <- fixedPage(
                 # selection of data file type
                 selectInput(inputId="dataFileType",
                             label="Select type of data file:",
-                            choices=c(" "=NA, "CSV template"='CSV',"Demo data"='Demo')),
+                            choices=c(" "=NA, "CSV file"='CSV',"Demo data"='Demo')),
                 
                 # show file upload control if user selects to upload a file
                 conditionalPanel(
@@ -89,20 +90,28 @@ ui <- fixedPage(
                          h5(strong(textOutput("figure2")), textOutput("legend2")), h3(""),
                          plotlyOutput("facet_plots", height="600px"),
                          conditionalPanel(condition="input.nestedRE",
-                                          h5(strong("Figure 3. Trendlines faceted by the clustered random effect variable."), br(),
+                                          h5(strong("Figure 3. Trendlines faceted by the higher-level random effect variable."), br(),
                                           "These plots can help determine if a random slope and/or random intercept would be 
-                                          appropriate for the nested random effect variable."))),
+                                          appropriate for the higher-level random effect variable."))),
                 
                 tabPanel(title="Model Results", h3(""),
                          htmlOutput("results_table"),
-                         uiOutput("selectModel"),
+                         plotlyOutput("coef_plot"), h3(""),
+                         h5(strong("Figure 4. Coefficient plot of the fixed effect estimates with 95% confidence intervals."), br(),
+                            "This plot is helpful to visualize the information presented in the Model Results table above."),
+                         h3(""), uiOutput("selectModel"),
                          conditionalPanel(
                              condition="input.model != ''",
-                             verbatimTextOutput("model_summary"))),
+                             verbatimTextOutput("model_summary"), h3(""),
+                             h5(strong("Convergence Warnings"), br(),
+                                "The optimizers are listed below preceded by a dollar sign. 
+                                Each optimizer is followed by its warning message(s) or NULL (no warnings).
+                                The default optimizer is NLOPT_LN_BOBYQA."),
+                             verbatimTextOutput("warnings"))),
                 
                 tabPanel(title="Diagnostic Plots",
-                         plotlyOutput("resid_plot", height="800px"), h3(""),
-                         h5(strong("Figure 4. Residual profile plots in increasing order of model complexity,"),
+                         plotlyOutput("resid_plot", height="675px"), h3(""),
+                         h5(strong("Figure 5. Residual profile plots in increasing order of model complexity,"),
                             "where each line represents a single profile of the random effect variable.
                             These plots are useful to visually compare the different model fits. Models with a 
                             large, nonconstant variability in the residuals over time indicate a worse model fit, whereas 
@@ -111,10 +120,10 @@ ui <- fixedPage(
                 tabPanel(title="Fitted Lines", h3(""),
                          uiOutput("selectModel2"),
                          plotlyOutput("trendlines"), h3(""),
-                         h5(strong(textOutput("figure5")), textOutput("legend5")),
+                         h5(strong(textOutput("figure6")), textOutput("legend6")),
                          conditionalPanel(condition="(input.model2 && input.nestedRE)",
                                           plotlyOutput("trendlines2"), h3(""),
-                                          h5(strong(textOutput("figure6")), textOutput("legend6")))))
+                                          h5(strong(textOutput("figure7")), textOutput("legend7")))))
         )
     )
 )
@@ -321,7 +330,7 @@ server <- function(input, output) {
         
         plot1 = ggplot(data) + 
             geom_point(aes(x=!!input$timeVar, y=!!input$response, color=!!color)) + 
-            theme_bw(base_size=12) + theme(legend.title=element_blank()) + guides(size="none")
+            theme_pubr(border=T) + theme(legend.title=element_blank()) + guides(size="none")
         
         ggplotly(plot1) %>%
             add_annotations(text=paste(color), xref="paper", yref="paper",
@@ -351,7 +360,7 @@ server <- function(input, output) {
       
       plot2 = ggplot() +
         geom_line(avg_donors, mapping=aes(x=!!input$timeVar, y=Avg, color=!!donor, linetype=Group), lwd=0.75) +
-        theme_bw(base_size=12) + labs(y=paste(input$response), linetype=paste(input$GroupVar)) +
+        theme_pubr(border=T) + labs(y=paste(input$response), linetype=paste(input$GroupVar)) +
         theme(legend.title=element_blank())
       
       ggplotly(plot2) %>%
@@ -367,9 +376,9 @@ server <- function(input, output) {
       
       if (input$nestedRE==TRUE){ #only show legend for nested data with donor models
         
-        title = "Figure 2. Average trendlines for the clustered random effect variable."
+        title = "Figure 2. Average trendlines for the higher-level random effect variable."
         text = "This plot can help determine if a random slope and/or random intercept would be appropriate 
-                for the clustered random effect variable. Missing data can also be identified by gaps in
+                for the higher-level random effect variable. Missing data can also be identified by gaps in
                 the lines or truncated lines."
       } else {
         
@@ -397,13 +406,13 @@ server <- function(input, output) {
         
         plot3 = ggplot(data, aes(x=!!input$timeVar, y=!!input$response, color=!!input$groupVar)) + 
             geom_line(aes(group=!!input$mouse)) + facet_wrap(vars(!!input$donor)) +
-            theme_bw(base_size=12) + theme(legend.title=element_blank()) + guides(size="none")
+            theme_pubr(border=T) + theme(legend.title=element_blank()) + guides(size="none")
         
         ggplotly(plot3) %>%
             add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
-                            x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
+                            x=0.3, xanchor="center", y=1.14, yanchor="top", 
                             legendtitle=TRUE, showarrow=FALSE) %>%
-            layout(legend=list(y=0.9, yanchor="top"))
+            layout(legend=list(x=0.6, y=1.15, xanchor="center", yanchor="top", orientation="h"))
     })
 
     # Model Results
@@ -510,16 +519,58 @@ server <- function(input, output) {
     
     # print model summary
     output$model_summary <- renderPrint({
+      req(dataProcessed(), input$model)
+      
+      match = which(Names()==input$model)
+      
+      if (input$model=="No Random Effects"){
+        sum.out = summ(noRE()[[2]], groups.table=F, pvals=F, confint=T)
+      } else {
+        sum.out = summ(Models()[[match]], groups.table=F, pvals=F, confint=T)
+      }
+      return(sum.out)
+    })
+    
+    # print convergence warnings
+    output$warnings <- renderPrint({
         req(dataProcessed(), input$model)
         
         match = which(Names()==input$model)
         
-        if (input$model=="No Random Effects"){
-            sum.out = summ(noRE()[[2]], groups.table=F, pvals=F, confint=T)
+        if (input$model!="No Random Effects"){
+            aa = allFit(Models()[[match]], verbose=F)
+            msgs = lapply(aa, function(x) x@optinfo$conv$lme4$messages)
         } else {
-            sum.out = summ(Models()[[match]], groups.table=F, pvals=F, confint=T)
+            msgs = NULL
         }
-        return(sum.out)
+        
+        print(msgs)
+  
+    })
+    
+    # coefficient plot for the model results
+    output$coef_plot <- renderPlotly({
+      req(dataProcessed(), Models(), Names())
+      data = dataProcessed()
+      
+      # call the coef_data function to get the data for the plot
+      coefs = coef_data(Models(), Names()) %>% arrange(desc(Model))
+      
+      coefs$Term = reorder(coefs$Term, coefs$Estimate)
+      coefs$Model = reorder(coefs$Model, desc(coefs$Model))
+      
+      plot4 = ggplot(coefs) + geom_point(aes(x=Estimate, y=Term, color=Model), position=position_dodge(width = 1/2)) +
+        geom_linerange(aes(y=Term, xmin=ci.low, xmax=ci.high, color=Model), position=position_dodge(width = 1/2), show.legend=F) +
+        geom_vline(xintercept = 0, colour = "grey60", linetype = 2) +
+        scale_color_manual(name="Model", values=gg_color_hue(5), breaks=Names()) + 
+        labs(x="Estimate", y=element_blank()) + theme_pubr(border=T, legend="right") +
+        theme(legend.title=element_blank()) + guides(size="none")
+      
+      ggplotly(plot4) %>%
+        add_annotations(text="Model", xref="paper", yref="paper",
+                        x=1.05, xanchor="left", y=0.7, yanchor="bottom", 
+                        legendtitle=TRUE, showarrow=FALSE) %>%
+        layout(legend=list(y=0.7, yanchor="top"))
     })
     
     # Diagnostic Plots
@@ -533,8 +584,10 @@ server <- function(input, output) {
         
         if (input$nestedRE==TRUE){
             RE = model.frame(Models()[[1]])[[paste(input$mouse)]]
+            RE.name = paste(input$mouse)
         } else {
             RE = model.frame(Models()[[1]])[[paste(input$re)]]
+            RE.name = paste(input$re)
         }
         
         Residuals = lapply(Models(), FUN=residuals)
@@ -543,9 +596,11 @@ server <- function(input, output) {
         resid_data = data.frame(Time, RE, Residuals, Model)
         resid_data$Model = factor(resid_data$Model, levels=rev(Names()))
         
+        colnames(resid_data)[1:2] = c(paste(input$timeVar), RE.name)
+        
         # time vs residuals to determine need for random effects
-        ggplot(resid_data, aes(x=Time, y=Residuals)) + theme_bw(base_size=12) +
-            geom_line(aes(group=RE)) + facet_wrap(~Model, ncol=2)
+        ggplot(data=resid_data, aes(x=.data[[paste(input$timeVar)]], y=Residuals)) + theme_pubr(border=T) +
+            geom_line(aes(group=.data[[RE.name]])) + facet_wrap(~Model, ncol=2)
     })
     
     # Trendlines
@@ -566,29 +621,34 @@ server <- function(input, output) {
         model = Models()[[match]]
         
         if ((match==3 || match==4) && input$nestedRE==TRUE){ #mouse plot for nested data with no donor models
-            plot5 = mouse_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
+            plot6 = mouse_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
   
         } else if (input$model2=="No Random Effects" && input$nestedRE==TRUE){ #plot for no random effects model (nested)
-            plot5 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$donor)
+            plot6 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$donor)
             
         } else if (input$model2=="No Random Effects" && input$nestedRE==FALSE){ #plot for no random effects model (non-nested)
-            plot5 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$re)
+            plot6 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$re)
             
         } else if ((match==1 || match==2) && input$nestedRE==TRUE){ #donor plot for nested data with donor models
-            plot5 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor)
+            plot6 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor)
             
         } else { #plot for non-nested data
-            plot5 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$re)
+            plot6 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$re)
         }
         
-        ggplotly(plot5) %>%
-            add_annotations(text=paste(input$donor), xref="paper", yref="paper",
+        p2 = ggplotly(plot6) 
+        
+        for (i in 1:(length(p2$x$data)/2)){
+          p2$x$data[[i]]$showlegend <- FALSE
+        }
+        
+        p2 %>% add_annotations(text=paste(input$donor), xref="paper", yref="paper",
                             x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
                             legendtitle=TRUE, showarrow=FALSE) %>%
             layout(legend=list(y=0.9, yanchor="top"))
     })
     
-    text5 <- reactive({
+    text6 <- reactive({
       req(dataProcessed(), input$model2, Names())
       
       # determine which model was selected from the dropdown menu
@@ -596,37 +656,37 @@ server <- function(input, output) {
       
       if ((match==3 || match==4) && input$nestedRE==TRUE){ #nested data & model with just one random effect
         
-        title = "Figure 5. Fitted lines for the nested random effect variable."
+        title = "Figure 6. Fitted lines for the nested random effect variable."
         text = "This plot is useful for visualizing how the inclusion of a random slope and/or
                 intercept affects the model fit for the nested random effect variable."
       
       } else if (input$model2=="No Random Effects"){ #model with no random effects
         
-        title = "Figure 5. Fitted lines for the grouping variable."
+        title = "Figure 6. Fitted lines for the grouping variable."
         text = "This plot is useful for visualizing how the inclusion of a random slope and/o
                 intercept affects the model fit for the grouping variable."
       
       } else if ((match==1 || match==2) && input$nestedRE==TRUE){ #nested data & model with both random effects
         
-        title = "Figure 5. Fitted lines for the clustered random effect variable."
+        title = "Figure 6. Fitted lines for the higher-level random effect variable."
         text = "This plot is useful for visualizing how the inclusion of a random slope and/or
-                intercept affects the model fit for the clustered random effect variable."
+                intercept affects the model fit for the higher-level random effect variable."
         
       } else { #non-nested data
         
-        title = "Figure 5. Fitted lines for the random effect variable."
+        title = "Figure 6. Fitted lines for the random effect variable."
         text = "This plot is useful for visualizing how the inclusion of a random slope and/or
                 intercept affects the model fit for the random effect variable."
       }
       list(title, text)
     })
     
-    output$figure5 <- function() {
-      text5()[[1]]
+    output$figure6 <- function() {
+      text6()[[1]]
     }
     
-    output$legend5 <- function() {
-      text5()[[2]]
+    output$legend6 <- function() {
+      text6()[[2]]
     }
       
     output$trendlines2 <- renderPlotly({
@@ -640,21 +700,21 @@ server <- function(input, output) {
         
         if (match==1 || match==2){ #only show plot for nested data with donor models
             
-          plot6 = mouse_lines(Models()[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
+          plot7 = mouse_lines(Models()[[match]], data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
             
-          ggplotly(plot6) %>%
-              add_annotations(text=paste(input$donor), xref="paper", yref="paper",
+          ggplotly(plot7) %>%
+              add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
                               x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
                               legendtitle=TRUE, showarrow=FALSE) %>%
               layout(legend=list(y=0.9, yanchor="top"))
           
         } else {
           
-          plot6 = NULL
+          plot7 = NULL
         }
     })
     
-    text6 <- reactive({
+    text7 <- reactive({
       req(dataProcessed(), input$model2, Names(), input$nestedRE)
       
       # determine which model was selected from the dropdown menu
@@ -664,7 +724,7 @@ server <- function(input, output) {
       
       if (match==1 || match==2){ #only show legend for nested data with donor models
         
-        title = "Figure 6. Fitted lines for the nested random effect variable."
+        title = "Figure 7. Fitted lines for the nested random effect variable."
         text = "This plot is useful for visualizing how the inclusion of a random slope and/or
                 intercept affects the model fit for the nested random effect variable."
       } else {
@@ -676,12 +736,12 @@ server <- function(input, output) {
       list(title, text)
     })
     
-    output$figure6 <- function() {
-      text6()[[1]]
+    output$figure7 <- function() {
+      text7()[[1]]
     }
     
-    output$legend6 <- function() {
-      text6()[[2]]
+    output$legend7 <- function() {
+      text7()[[2]]
     }
     
     #outputOptions(output, "trendlines2", suspendWhenHidden = FALSE)
