@@ -71,7 +71,7 @@ summary_table <- function(data, y, time, group, re, covariates=""){
 slopes_model <- function(data, y, time, group, donor, mouse, covariates=""){
   
   #specify model name
-  slopes_name = paste(donor, "Slope/Intercept +", mouse, "Slope/Intercept")
+  slopes_name = paste(donor, "Intercept/Slope +", mouse, "Intercept/Slope")
   
   #specify fixed and random effects
   fixed = paste(y, "~", group, "*", time)
@@ -96,7 +96,7 @@ slopes_model <- function(data, y, time, group, donor, mouse, covariates=""){
 mouse_slope_model <- function(data, y, time, group, donor, mouse, covariates=""){
   
   #specify model name
-  mouse_slope_name = paste(donor, "Intercept +", mouse, "Slope/Intercept")
+  mouse_slope_name = paste(donor, "Intercept +", mouse, "Intercept/Slope")
   
   #specify fixed and random effects
   fixed = paste(y, "~", group, "*", time)
@@ -121,7 +121,7 @@ mouse_slope_model <- function(data, y, time, group, donor, mouse, covariates="")
 mouse_model <- function(data, y, time, group, donor, mouse, covariates=""){
   
   #specify model name
-  mouse_name = paste(mouse, "Slope/Intercept")
+  mouse_name = paste(mouse, "Intercept/Slope")
   
   #specify fixed and random effects
   fixed = paste(y, "~", group, "*", time)
@@ -192,7 +192,7 @@ noRE_model <- function(data, y, time, group, covariates=""){
 REslope_model <- function(data, y, time, group, re, covariates=""){
   
   #specify model name
-  REslope_name = paste(re, "Slope/Intercept")
+  REslope_name = paste(re, "Intercept/Slope")
   
   #specify fixed and random effects
   fixed = paste(y, "~", group, "*", time)
@@ -245,11 +245,13 @@ results_table <- function(models, pvalues, names){
   out = p = c()
   for (i in 1:length(models)){
     
+    # store the summary of the coefficients for each model 
     mod.sum = summary(models[[i]])$coefficients
     
-    est = round(mod.sum[-1, "Estimate"], 2)
-    se = round(mod.sum[-1, "Std. Error"], 2)
-    pval = mod.sum[-1, "Pr(>|t|)"]
+    # extract the desired information from the summary
+    est = round(mod.sum[2:4, "Estimate"], 2)
+    se = round(mod.sum[2:4, "Std. Error"], 2)
+    pval = mod.sum[2:4, "Pr(>|t|)"]
     log = round(logLik(models[[i]]), 2)
     
     temp = c(paste0(est, " (", se, ")"), log)
@@ -269,9 +271,56 @@ results_table <- function(models, pvalues, names){
 }
 
 
+# function for coefficient data
+# inputs: a list of models and a list of model names
+# output: a data frame of the coefficient estimates, standard errors, and 
+#         confidence intervals for each fixed effect term per model
+
+coef_data <- function(models, names){
+  
+  n = length(models)
+  terms = c("Group", "Time", "Interaction")
+  
+  out = c()
+  for (i in 1:n){ # loop through the models
+    
+    # extract the coefficient estimates and standard errors from the model summary
+    sum = summary(models[[i]])$coefficients[2:4, 1:2]
+    
+    # compute the confidence intervals for the coefficient estimates
+    if (i!=n) { # mixed model
+      ci = confint(models[[i]], parm="beta_", method="Wald")[-1,]
+    } else { # linear model
+      ci = confint(models[[i]])[-1,]
+    }
+  
+    out = rbind(out, cbind(sum, ci))
+  }
+  
+  # add the names of the terms and models
+  data = as.data.frame(out) %>% remove_rownames() %>%
+    mutate(Term=rep(terms, times=n), Model=rep(names, each=3)) %>% 
+    rename(ci.low=`2.5 %`, ci.high=`97.5 %`)
+  
+  # specify the factor variables
+  data$Model = factor(data$Model, levels=names, labels=names)
+  data$Term = factor(data$Term, levels=terms, labels=terms)
+  
+  return(data)
+}
+  
+
+# function to recreate the ggplot2 color palette 
+# https://stackoverflow.com/questions/8197559/emulate-ggplot2-default-color-palette
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+
+
 # function for donor fitted lines
 # inputs: a model object as well as a data frame and variable names
-# output: a plot of response vs time with fitted lines
+# output: a scatterplot of response vs time with fitted lines
 
 # plot donor fitted lines based on specified model using ggplot
 donor_lines = function(model, data, y, time, group, donor){
@@ -311,15 +360,17 @@ donor_lines = function(model, data, y, time, group, donor){
   donor_data = data.frame(donors, Group, intercepts=as.numeric(as.character(intercepts)), slopes=as.numeric(as.character(slopes)))
   donor_data$donors = factor(donor_data$donors, levels=levels(data[[paste(donor)]]))
   
+  colnames(donor_data)[1:2] = c(donor, group)
+  
   # specify color vector (Donor) and title for plot
-  Donor = data[[paste(donor)]]
+  data[[paste(donor)]] = data[[paste(donor)]]
   title = paste(donor, "Fitted Lines", sep=" ")
   
   # create scatterplot with fitted lines (color based on donor, type based on group)
   p = ggplot() + 
-    geom_point(aes(x=data[[paste(time)]], y=data[[paste(y)]], color=Donor), show.legend=FALSE) +
-    geom_abline(data=donor_data, aes(intercept=intercepts, slope=slopes, color=donors, linetype=Group)) +
-    theme_bw() + labs(x=paste(time), y=paste(y)) + guides(color=FALSE) +
+    geom_point(data=data, aes(x=.data[[paste(time)]], y=.data[[paste(y)]], color=.data[[paste(donor)]]), show.legend=F) +
+    geom_abline(data=donor_data, aes(intercept=intercepts, slope=slopes, color=.data[[paste(donor)]], linetype=.data[[paste(group)]])) +
+    theme_pubr(border=T) + labs(x=paste(time), y=paste(y)) + guides(color="none") +
     theme(legend.title=element_blank())
   
   return(p)
@@ -327,7 +378,7 @@ donor_lines = function(model, data, y, time, group, donor){
 
 # function for mouse fitted lines
 # inputs: a model object as well as a data frame and variable names
-# output: a plot of response vs time with fittled lines
+# output: a scatterplot of response vs time with fitted lines faceted by donor
 
 # coef(model)[[`donor:mouse`]] only includes the mouse random effects
 # need to add ranef(model)[[donor]] + ranef(model)[[`donor:mouse`]] to the fixed effects instead
@@ -417,16 +468,18 @@ mouse_lines = function(model, data, y, time, group, donor, mouse){
   type_data$donors = factor(type_data$donors, levels=levels(data[[paste(donor)]]))
   type_data$mice = factor(type_data$mice, levels=levels(data[[paste(mouse)]]))
   
+  colnames(type_data)[1:3] = c(mouse, donor, group)
+  
   # specify color vector (Donor) and title for plot
-  Donor = as.factor(data[[paste(donor)]]) 
+  data[[paste(donor)]] = as.factor(data[[paste(donor)]]) 
   title = paste(mouse, "Fitted Lines", sep=" ")
   
   # create scatterplot with fitted lines (color based on donor, type based on group)
   p = ggplot() + 
-    geom_point(aes(x=data[[paste(time)]], y=data[[paste(y)]], color=Donor), show.legend=FALSE) +
-    geom_abline(data=type_data, aes(intercept=intercepts, slope=slopes, color=donors, linetype=Group)) +
-    theme_bw() + labs(x=paste(time), y=paste(y)) + guides(color=FALSE) +
-    theme(legend.title=element_blank())
+    geom_point(data=data, aes(x=.data[[paste(time)]], y=.data[[paste(y)]], color=.data[[paste(group)]]), show.legend=FALSE) +
+    geom_abline(data=type_data, aes(intercept=intercepts, slope=slopes, color=.data[[paste(group)]])) +
+    theme_pubr(border=T) + labs(x=paste(time), y=paste(y)) + guides(color="none") +
+    theme(legend.title=element_blank()) + facet_wrap(~.data[[paste(donor)]])
   
   return(p)
 }
