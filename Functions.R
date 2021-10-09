@@ -12,6 +12,9 @@
 
 summary_table <- function(data, y, time, group, re, covariates=""){
   
+  #args = formalArgs()
+  #covariates = unlist(covariates)
+  
   # extract the levels of the random effect variable
   donors = levels(data[[re]])
   
@@ -89,7 +92,7 @@ slopes_model <- function(data, y, time, group, donor, mouse, covariates=""){
   slopes = lmerTest::lmer(slopes_formula, data)
   
   #output list with model and model name
-  return(list(slopes_name, slopes))
+  return(list(slopes_name, slopes, slopes_formula))
 }
 
 # create a model with a random slope and intercept for mouse and a random intercept for donor
@@ -114,7 +117,7 @@ mouse_slope_model <- function(data, y, time, group, donor, mouse, covariates="")
   mouse_slope = lmerTest::lmer(mouse_slope_formula, data)
   
   #output list with model and model name
-  return(list(mouse_slope_name, mouse_slope))
+  return(list(mouse_slope_name, mouse_slope, mouse_slope_formula))
 }
 
 # create a model with a random slope and intercept for mouse
@@ -138,7 +141,7 @@ mouse_model <- function(data, y, time, group, donor, mouse, covariates=""){
   mouse_ = lmerTest::lmer(mouse_formula, data)
   
   #output list with model and model name
-  return(list(mouse_name, mouse_))
+  return(list(mouse_name, mouse_, mouse_formula))
 }
 
 # create a model with just a random intercept for mouse
@@ -162,7 +165,7 @@ mouse_int_model <- function(data, y, time, group, donor, mouse, covariates=""){
   mouse_int = lmerTest::lmer(int_formula, data)
   
   #output list with model and model name
-  return(list(mouse_int_name, mouse_int))
+  return(list(mouse_int_name, mouse_int, int_formula))
 }
 
 # create a model with no random effects
@@ -185,7 +188,7 @@ noRE_model <- function(data, y, time, group, covariates=""){
   noRE_mod = stats::lm(formula, data)
   
   #output list with model and model name
-  return(list(noRE_name, noRE_mod))
+  return(list(noRE_name, noRE_mod, formula))
 }
 
 # create a model with a random slope and intercept for a non-nested random effect
@@ -209,7 +212,7 @@ REslope_model <- function(data, y, time, group, re, covariates=""){
   REslope_mod = lmerTest::lmer(REslope_formula, data)
   
   #output list with model and model name
-  return(list(REslope_name, REslope_mod))
+  return(list(REslope_name, REslope_mod, REslope_formula))
 }
 
 # create a model with just a random intercept for a non-nested random effect
@@ -233,7 +236,7 @@ REint_model <- function(data, y, time, group, re, covariates=""){
   REint_mod = lmerTest::lmer(REint_formula, data)
   
   #output list with model and model name
-  return(list(REint_name, REint_mod))
+  return(list(REint_name, REint_mod, REint_formula))
 }
 
 # function for results table
@@ -298,7 +301,7 @@ coef_data <- function(models, names){
   }
   
   # add the names of the terms and models
-  data = as.data.frame(out) %>% remove_rownames() %>%
+  data = as.data.frame(out) %>% 
     mutate(Term=rep(terms, times=n), Model=rep(names, each=3)) %>% 
     rename(ci.low=`2.5 %`, ci.high=`97.5 %`)
   
@@ -370,8 +373,9 @@ donor_lines = function(model, data, y, time, group, donor){
   p = ggplot() + 
     geom_point(data=data, aes(x=.data[[paste(time)]], y=.data[[paste(y)]], color=.data[[paste(donor)]]), show.legend=F) +
     geom_abline(data=donor_data, aes(intercept=intercepts, slope=slopes, color=.data[[paste(donor)]], linetype=.data[[paste(group)]])) +
-    theme_pubr(border=T) + labs(x=paste(time), y=paste(y)) + guides(color="none") +
-    theme(legend.title=element_blank())
+    theme_bw(base_size=12) + labs(x=paste(time), y=paste(y)) + guides(color="none") +
+    theme(legend.title=element_blank(), panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank())
   
   return(p)
 }
@@ -476,10 +480,11 @@ mouse_lines = function(model, data, y, time, group, donor, mouse){
   
   # create scatterplot with fitted lines (color based on donor, type based on group)
   p = ggplot() + 
-    geom_point(data=data, aes(x=.data[[paste(time)]], y=.data[[paste(y)]], color=.data[[paste(group)]]), show.legend=FALSE) +
+    geom_point(data=data, aes(x=.data[[paste(time)]], y=.data[[paste(y)]], color=.data[[paste(group)]]), size=1, show.legend=FALSE) +
     geom_abline(data=type_data, aes(intercept=intercepts, slope=slopes, color=.data[[paste(group)]])) +
-    theme_pubr(border=T) + labs(x=paste(time), y=paste(y)) + guides(color="none") +
-    theme(legend.title=element_blank()) + facet_wrap(~.data[[paste(donor)]])
+    theme_bw(base_size=12) + labs(x=paste(time), y=paste(y)) + guides(color="none") +
+    theme(legend.title=element_blank(), panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank()) + facet_wrap(~.data[[paste(donor)]])
   
   return(p)
 }
