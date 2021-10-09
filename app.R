@@ -16,13 +16,15 @@
 library(shiny)
 library(lme4)
 library(lmerTest)
-library(tidyverse)
-library(ggpubr)
+library(dplyr)
+library(tidyr) #gather, drop_na
+library(ggplot2)
 library(plotly)
 library(broom.mixed)
 library(jtools) #export_summs, summ
 library(kableExtra)
-library(dotwhisker) #dwplot
+library(dfoptim)
+library(optimx)
 
 
 # Define UI ----
@@ -88,7 +90,7 @@ ui <- fixedPage(
                             variable and time before proceeding with a linear mixed effects model."),
                          plotlyOutput("avg_trend"), h3(""),
                          h5(strong(textOutput("figure2")), textOutput("legend2")), h3(""),
-                         plotlyOutput("facet_plots", height="600px"),
+                         plotlyOutput("facet_plots"),
                          conditionalPanel(condition="input.nestedRE",
                                           h5(strong("Figure 3. Trendlines faceted by the higher-level random effect variable."), br(),
                                           "These plots can help determine if a random slope and/or random intercept would be 
@@ -105,7 +107,7 @@ ui <- fixedPage(
                              verbatimTextOutput("model_summary"), h3(""),
                              h5(strong("Convergence Warnings"), br(),
                                 "The optimizers are listed below preceded by a dollar sign. 
-                                Each optimizer is followed by its warning message(s) or NULL (no warnings).
+                                Each optimizer is followed by its warning message(s) or none (no warnings).
                                 The default optimizer is NLOPT_LN_BOBYQA."),
                              verbatimTextOutput("warnings"))),
                 
@@ -329,8 +331,10 @@ server <- function(input, output) {
         }
         
         plot1 = ggplot(data) + 
-            geom_point(aes(x=!!input$timeVar, y=!!input$response, color=!!color)) + 
-            theme_pubr(border=T) + theme(legend.title=element_blank()) + guides(size="none")
+          geom_point(aes(x=!!input$timeVar, y=!!input$response, color=!!color)) + 
+          theme_bw(base_size=12) + guides(size="none") +
+          theme(legend.title=element_blank(), panel.grid.major=element_blank(),
+                panel.grid.minor=element_blank())
         
         ggplotly(plot1) %>%
             add_annotations(text=paste(color), xref="paper", yref="paper",
@@ -360,8 +364,9 @@ server <- function(input, output) {
       
       plot2 = ggplot() +
         geom_line(avg_donors, mapping=aes(x=!!input$timeVar, y=Avg, color=!!donor, linetype=Group), lwd=0.75) +
-        theme_pubr(border=T) + labs(y=paste(input$response), linetype=paste(input$GroupVar)) +
-        theme(legend.title=element_blank())
+        theme_bw(base_size=12) + labs(y=paste(input$response), linetype=paste(input$GroupVar)) +
+        theme(legend.title=element_blank(), panel.grid.major=element_blank(),
+              panel.grid.minor=element_blank())
       
       ggplotly(plot2) %>%
         add_annotations(text=paste(donor), xref="paper", yref="paper",
@@ -405,14 +410,21 @@ server <- function(input, output) {
         data = dataProcessed()
         
         plot3 = ggplot(data, aes(x=!!input$timeVar, y=!!input$response, color=!!input$groupVar)) + 
-            geom_line(aes(group=!!input$mouse)) + facet_wrap(vars(!!input$donor)) +
-            theme_pubr(border=T) + theme(legend.title=element_blank()) + guides(size="none")
+          geom_line(aes(group=!!input$mouse)) + facet_wrap(vars(!!input$donor)) +
+          theme_bw(base_size=12) + guides(size="none") +
+          theme(legend.title=element_blank(), panel.grid.major=element_blank(),
+                panel.grid.minor=element_blank())
         
         ggplotly(plot3) %>%
-            add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
-                            x=0.3, xanchor="center", y=1.14, yanchor="top", 
-                            legendtitle=TRUE, showarrow=FALSE) %>%
-            layout(legend=list(x=0.6, y=1.15, xanchor="center", yanchor="top", orientation="h"))
+          add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
+                          x=1.02, xanchor="left", y=0.9, yanchor="bottom", 
+                          legendtitle=TRUE, showarrow=FALSE) %>%
+          layout(legend=list(y=0.9, yanchor="top"))
+        
+            #add_annotations(text=paste(input$groupVar), xref="paper", yref="paper",
+                            #x=0.3, xanchor="center", y=1.14, yanchor="top", 
+                            #legendtitle=TRUE, showarrow=FALSE) %>%
+            #layout(legend=list(x=0.6, y=1.15, xanchor="center", yanchor="top", orientation="h"))
     })
 
     # Model Results
@@ -467,6 +479,18 @@ server <- function(input, output) {
         }
         models
     })
+
+    Formulas <- reactive({
+        
+        if (input$nestedRE==TRUE){
+            formulas = list(slopes()[[3]], mouse_slope()[[3]], mouse_()[[3]],
+                            mouse_int()[[3]], noRE()[[3]])
+        } else {
+            formulas = list(mouse_()[[3]], mouse_int()[[3]], noRE()[[3]])
+        }
+        formulas
+    })
+
     
     # create model results table
     output$results_table <- renderText({
@@ -536,13 +560,35 @@ server <- function(input, output) {
         req(dataProcessed(), input$model)
         
         match = which(Names()==input$model)
-        
+        formula = Formulas()[[match]]
+
+	optimizer = rep(c("bobyqa", "Nelder_Mead", "nlminbwrap", "nmkbw", "optimx", "nloptwrap" ), 
+                	c(rep(1,5),2))
+	method = c(rep("",4), "L-BFGS-B", "NLOPT_LN_NELDERMEAD", "NLOPT_LN_BOBYQA")
+	fit.names = gsub("\\.$", "", paste(optimizer, method, sep="."))
+		        
         if (input$model!="No Random Effects"){
-            aa = allFit(Models()[[match]], verbose=F)
-            msgs = lapply(aa, function(x) x@optinfo$conv$lme4$messages)
-        } else {
-            msgs = NULL
-        }
+
+	    model = lmerTest::lmer(formula, dataProcessed())
+
+	    msgs = list()
+	    for (i in 1:length(optimizer)){
+  
+	      if (method[i]==""){
+	        model2 = update(model, control=lmerControl(optimizer=optimizer[i]))
+	      } else if (optimizer[i]=="nloptwrap") {
+	        model2 = update(model, control=lmerControl(optimizer=optimizer[i], optCtrl=list(algorithm=method[i])))
+	      } else {
+	        model2 = update(model, control=lmerControl(optimizer=optimizer[i], optCtrl=list(method=method[i])))
+	      }
+  
+	      msg = model2@optinfo$conv$lme4$messages
+	      if (is.null(msg)) {msg="none"}
+	      msgs[[i]] = msg
+	    }
+	    names(msgs) =  fit.names
+
+        } else {msgs = NULL}
         
         print(msgs)
   
@@ -563,8 +609,9 @@ server <- function(input, output) {
         geom_linerange(aes(y=Term, xmin=ci.low, xmax=ci.high, color=Model), position=position_dodge(width = 1/2), show.legend=F) +
         geom_vline(xintercept = 0, colour = "grey60", linetype = 2) +
         scale_color_manual(name="Model", values=gg_color_hue(5), breaks=Names()) + 
-        labs(x="Estimate", y=element_blank()) + theme_pubr(border=T, legend="right") +
-        theme(legend.title=element_blank()) + guides(size="none")
+        labs(x="Estimate", y=element_blank()) + theme_bw(base_size=12) +
+        theme(legend.title=element_blank(), panel.grid.major=element_blank(),
+              panel.grid.minor=element_blank()) + guides(size="none")
       
       ggplotly(plot4) %>%
         add_annotations(text="Model", xref="paper", yref="paper",
@@ -599,8 +646,9 @@ server <- function(input, output) {
         colnames(resid_data)[1:2] = c(paste(input$timeVar), RE.name)
         
         # time vs residuals to determine need for random effects
-        ggplot(data=resid_data, aes(x=.data[[paste(input$timeVar)]], y=Residuals)) + theme_pubr(border=T) +
-            geom_line(aes(group=.data[[RE.name]])) + facet_wrap(~Model, ncol=2)
+        ggplot(data=resid_data, aes(x=.data[[paste(input$timeVar)]], y=Residuals)) + 
+          theme_bw(base_size=12) + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) +
+          geom_line(aes(group=.data[[RE.name]])) + facet_wrap(~Model, ncol=2)
     })
     
     # Trendlines
@@ -622,24 +670,39 @@ server <- function(input, output) {
         
         if ((match==3 || match==4) && input$nestedRE==TRUE){ #mouse plot for nested data with no donor models
             plot6 = mouse_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor, input$mouse)
+            p2 = ggplotly(plot6) 
   
         } else if (input$model2=="No Random Effects" && input$nestedRE==TRUE){ #plot for no random effects model (nested)
             plot6 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$donor)
+            p2 = ggplotly(plot6) 
+
+            for (i in 1:(length(p2$x$data)/2)){
+              p2$x$data[[i]]$showlegend <- FALSE
+            }
             
         } else if (input$model2=="No Random Effects" && input$nestedRE==FALSE){ #plot for no random effects model (non-nested)
             plot6 = donor_lines(noRE()[[2]], data, input$response, input$timeVar, input$groupVar, input$re)
+            p2 = ggplotly(plot6) 
+            
+            for (i in 1:(length(p2$x$data)/2)){
+              p2$x$data[[i]]$showlegend <- FALSE
+            }
             
         } else if ((match==1 || match==2) && input$nestedRE==TRUE){ #donor plot for nested data with donor models
             plot6 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$donor)
+            p2 = ggplotly(plot6) 
+            
+            for (i in 1:(length(p2$x$data)/2)){
+              p2$x$data[[i]]$showlegend <- FALSE
+            }
             
         } else { #plot for non-nested data
             plot6 = donor_lines(model, data, input$response, input$timeVar, input$groupVar, input$re)
-        }
-        
-        p2 = ggplotly(plot6) 
-        
-        for (i in 1:(length(p2$x$data)/2)){
-          p2$x$data[[i]]$showlegend <- FALSE
+            p2 = ggplotly(plot6) 
+            
+            for (i in 1:(length(p2$x$data)/2)){
+              p2$x$data[[i]]$showlegend <- FALSE
+            }
         }
         
         p2 %>% add_annotations(text=paste(input$donor), xref="paper", yref="paper",
@@ -743,8 +806,6 @@ server <- function(input, output) {
     output$legend7 <- function() {
       text7()[[2]]
     }
-    
-    #outputOptions(output, "trendlines2", suspendWhenHidden = FALSE)
 }
 
 # Run the app ----
