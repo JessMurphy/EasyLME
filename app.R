@@ -726,7 +726,7 @@ server <- function(input, output) {
       } else if (input$model2=="No Random Effects"){ #model with no random effects
         
         title = "Figure 6. Fitted lines for the grouping variable."
-        text = "This plot is useful for visualizing how the inclusion of a random slope and/o
+        text = "This plot is useful for visualizing how the inclusion of a random slope and/or
                 intercept affects the model fit for the grouping variable."
       
       } else if ((match==1 || match==2) && input$nestedRE==TRUE){ #nested data & model with both random effects

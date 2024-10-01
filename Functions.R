@@ -292,9 +292,9 @@ coef_data <- function(models, names){
     
     # compute the confidence intervals for the coefficient estimates
     if (i!=n) { # mixed model
-      ci = confint(models[[i]], parm="beta_", method="Wald")[-1,]
+      ci = confint(models[[i]], parm="beta_", method="Wald")[2:4,]
     } else { # linear model
-      ci = confint(models[[i]])[-1,]
+      ci = confint(models[[i]])[2:4,]
     }
   
     out = rbind(out, cbind(sum, ci))
