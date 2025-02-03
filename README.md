@@ -1,6 +1,6 @@
 # EasyLME Shiny App
 
-This repository contains the Shiny app for the manuscript titled [Accessible Analysis of Longitudinal Data Using Linear Mixed Effects Models](https://journals.biologists.com/dmm/article/15/5/dmm048025/275308/Accessible-analysis-of-longitudinal-data-with).
+This repository contains the [Shiny app](https://shiny.clas.ucdenver.edu/EasyLME/) for the manuscript titled [Accessible Analysis of Longitudinal Data Using Linear Mixed Effects Models](https://journals.biologists.com/dmm/article/15/5/dmm048025/275308/Accessible-analysis-of-longitudinal-data-with).
 
 | **Filename**			| **Description** |
 |:------------------------------|:----------------|
